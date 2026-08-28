@@ -1,0 +1,119 @@
+# ==============================================================================
+# User-facing COMET pipeline parameters
+# ==============================================================================
+#
+# This file contains everything a user is expected to edit for a given
+# deployment/checkout: where things live on disk, and the scientific/runtime
+# parameters for each pipeline stage. Pipeline code itself (sopa-plus/) does
+# not default any of this off its own location -- see sopa-plus/nextflow.config.
+#
+# Only non-default values are listed below: where a tool (the image-prep
+# script, SOPA's own pipeline, an export script) already has a sensible
+# built-in default, that key is simply omitted here rather than restated.
+
+# ------------------------------------------------------------------------------
+# Paths
+# ------------------------------------------------------------------------------
+
+samplesheet: "master_samplesheet.csv"
+outdir: "./outputs"
+
+# ------------------------------------------------------------------------------
+# Image preparation
+# ------------------------------------------------------------------------------
+
+image_preparation:
+  # Channel interval used to build the composite MIP.
+  # Python slicing convention: start included, end excluded.
+  # For liver CYX image with DAPI at C1 and markers C2-C21: mip_end: 21
+  mip_end: 21
+
+  drop_channel_names: "TRITC,Cy5"
+  write_clean_channel_names_to_ome: false
+
+  # Reuse a previously prepared image if one already exists in outputs/.
+  prepare_skip_if_complete: true
+
+# ------------------------------------------------------------------------------
+# SOPA adapter parameters
+# ------------------------------------------------------------------------------
+
+sopa_adapter:
+  required_channels: "composite_MIP,DAPI"
+  skip_if_complete: true
+  resume: true
+  profile: "singularity"
+
+# ------------------------------------------------------------------------------
+# SOPA / nf-core/sopa parameters
+# ------------------------------------------------------------------------------
+#
+# This section is copied into:
+#   outputs/00_runtime/sopa_inputs/sopa_params.generated.yml
+#
+# input/outdir are NOT written here.
+# They are generated dynamically by the outer Nextflow workflow.
+
+sopa:
+  technology: ome_tif
+
+  patch_width_pixel: 3000
+  patch_overlap_pixel: 80
+
+  use_cellpose: true
+  cellpose_model_type: "sam"
+  cellpose_channels: "composite_MIP,DAPI"
+  cellpose_diameter: 30
+
+  cellprob_threshold: 0
+  cellpose_use_gpu: true
+  cellpose_max_forks: 8
+
+  aggregate_channels: true
+  min_intensity_ratio: 0.2
+  min_area_pixels2: 200
+  expand_radius_ratio: "0.1"
+
+  pixel_size: 0.28
+
+# ------------------------------------------------------------------------------
+# Segmentation export
+# ------------------------------------------------------------------------------
+# No non-default values currently -- shape_key omitted below means "choose
+# the SOPA shape layer automatically" (the export script's own default).
+
+segmentation_export: {}
+
+# ------------------------------------------------------------------------------
+# Notebook parameters injected by Papermill
+# ------------------------------------------------------------------------------
+
+notebooks:
+
+  rapids:
+    dapi_qc_percentile: 15
+    render_quarto_html: true
+    render_quarto_pdf: false
+
+  scimap:
+    gmm_components: 3
+    log: true
+    method: "all"
+    random_state: 0
+    positivity_threshold: 0.5
+    top_n_populations: 30
+    top_n_spatial_populations: 15
+
+  cluster_exploration:
+    selected_normalizations: "arcsinh,log1p"
+    selected_resolutions: "0.5, 0.1"
+    selected_umap_min_dists: "0.3"
+    top_n_markers: 30
+    marker_colormap: "RdYlBu_r"
+
+  contingency:
+    top_n_populations: 30
+
+  spatial:
+    cluster_normalization: "arcsinh"
+    cluster_resolution: "0.5"

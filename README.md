@@ -1,125 +1,176 @@
-Spatial-mIFlow workflow
 
-A modular Nextflow workflow for large-scale multiplex immunofluorescence image analysis from OME-TIFF images to SOPA segmentation, single-cell AnnData objects, RAPIDS clustering, SCIMAP-style gating, contingency analysis, segmentation export, and spatial analysis.
 
-This project was designed for COMET / Lunaphore-like multiplex IF images, but the architecture is intended to be portable across HPC systems when the input images are OME-TIFF and the channel configuration is correctly described in params.yml.
+Aller au contenu
+Utiliser Gmail avec un lecteur d'écran
+Conversations
+2 % sur 5 120 Go utilisés
+Conditions d'utilisation · Confidentialité · Règlement du programme
+Dernière activité sur le compte : il y a 28 minutes
+Détails
+# Spatial-mIFlow
 
-1. Project purpose
+A modular [Nextflow](https://www.nextflow.io/) workflow for large-scale multiplex immunofluorescence (mIF) image analysis — from OME-TIFF images to SOPA segmentation, single-cell AnnData objects, RAPIDS clustering, SCIMAP-style gating, contingency analysis, segmentation export, and spatial analysis.
+
+Designed for COMET / Lunaphore-like multiplex IF images, the architecture is intended to be portable across HPC systems as long as the input images are OME-TIFF and the channel configuration is correctly described in `params.yml`.
+
+---
+
+## Table of contents
+
+- [1. Project purpose](#1-project-purpose)
+- [2. Repository layout](#2-repository-layout)
+- [3. Main execution command](#3-main-execution-command)
+- [4. User-facing configuration: `params.yml`](#4-user-facing-configuration-paramsyml)
+- [5. Deployment-level `nextflow.config`](#5-deployment-level-nextflowconfig)
+- [6. Pipeline code: `Spatial-mIFlow/`](#6-pipeline-code-spatial-miflow)
+- [7. Module documentation](#7-module-documentation)
+- [8. AnnData contracts between modules](#8-anndata-contracts-between-modules)
+- [9. Output directory structure](#9-output-directory-structure)
+- [10. Runtime and cache files](#10-runtime-and-cache-files)
+- [11. How `-resume` behaves](#11-how--resume-behaves)
+- [12. Manual thresholding annotation side analysis](#12-manual-thresholding-annotation-side-analysis)
+- [13. Article-ready software architecture summary](#13-article-ready-software-architecture-summary)
+- [14. Minimal checklist before running](#14-minimal-checklist-before-running)
+
+---
+
+## 1. Project purpose
 
 The workflow automates the main technical and computational steps required to process large multiplex IF images:
 
-Prepare raw OME-TIFF images for SOPA.
+- Prepare raw OME-TIFF images for SOPA.
+- Add a `composite_MIP` channel for segmentation support.
+- Run SOPA / Cellpose segmentation.
+- Collect SOPA single-cell measurements as AnnData.
+- Perform DAPI-based quality control and RAPIDS/Scanpy clustering.
+- Export SOPA segmentation polygons to `.npz` for downstream visualization.
+- Run SCIMAP-style automatic marker gating.
+- Explore clusters, marker signatures, and UMAPs.
+- Compare clusters with gated populations.
+- Run spatial analysis on clustered or gated cell populations.
 
-Add a composite_MIP channel for segmentation support.
+The project is organized around a reusable pipeline code folder, `Spatial-mIFlow/`, and a user-facing project root containing the sample sheet, parameters, output folder, launcher, and deployment-level configuration.
 
-Run SOPA / Cellpose segmentation.
+---
 
-Collect SOPA single-cell measurements as AnnData.
+## 2. Repository layout
 
-Perform DAPI-based quality control and RAPIDS/Scanpy clustering.
-
-Export SOPA segmentation polygons to .npz for downstream visualization.
-
-Run SCIMAP-style automatic marker gating.
-
-Explore clusters, marker signatures, and UMAPs.
-
-Compare clusters with gated populations.
-
-Run spatial analysis on clustered or gated cell populations.
-
-The current project is organized around a reusable pipeline code folder, Spatial-mIFlow/, and a user-facing project root that contains the sample sheet, parameters, output folder, launcher, and deployment-level configuration.
-
-2. Current repository layout
-
+```text
 Development_COMET_imaging_pipeline/
-├── master_samplesheet.csv              # User sample sheet
-├── params.yml                          # User-facing scientific/runtime parameters
-├── nextflow.config                     # Deployment-level engine/cache configuration
-├── run_pipeline_slurm.sh               # SLURM launcher
-├── data/                               # Raw input images
-├── outputs/                            # Generated results
-├── logs/                               # SLURM stdout/stderr logs
-├── Spatial-mIFlow/                          # Reusable pipeline code
-│   ├── main.nf                         # Main DSL2 workflow
-│   ├── nextflow.config                 # Pipeline-level process/resource config
-│   ├── modules/                        # Independent workflow modules
-│   └── programs_hierarchy/             # Embedded SOPA pipeline/configs
-└── archive/                            # Old code / backups, not part of runtime
+├── master_samplesheet.csv         # User sample sheet
+├── params.yml                     # User-facing scientific/runtime parameters
+├── nextflow.config                # Deployment-level engine/cache configuration
+├── run_pipeline_slurm.sh          # SLURM launcher
+├── data/                          # Raw input images
+├── outputs/                       # Generated results
+├── logs/                          # SLURM stdout/stderr logs
+├── Spatial-mIFlow/                # Reusable pipeline code
+│   ├── main.nf                    # Main DSL2 workflow
+│   ├── nextflow.config            # Pipeline-level process/resource config
+│   ├── modules/                   # Independent workflow modules
+│   └── programs_hierarchy/        # Embedded SOPA pipeline/configs
+└── archive/                       # Old code / backups, not part of runtime
+```
 
-The important design decision is:
+The important design decision is the separation of concerns:
 
-project root      = user deployment layer
-Spatial-mIFlow/        = reusable pipeline code
-params.yml        = user-editable parameters
-outputs/          = generated analysis outputs
-scratch/work dir  = Nextflow work, SOPA work, caches, temporary runtime logs
+| Location | Role |
+| --- | --- |
+| project root | User deployment layer |
+| `Spatial-mIFlow/` | Reusable pipeline code |
+| `params.yml` | User-editable parameters |
+| `outputs/` | Generated analysis outputs |
+| scratch / work dir | Nextflow work, SOPA work, caches, temporary runtime logs |
 
-3. Main execution command
+---
+
+## 3. Main execution command
 
 Submit the pipeline with SLURM:
 
+```bash
 sbatch run_pipeline_slurm.sh
+```
 
 Resume a previous run:
 
+```bash
 sbatch run_pipeline_slurm.sh -resume
+```
 
 Use a custom Nextflow work directory:
 
+```bash
 sbatch run_pipeline_slurm.sh -w /scratch/$USER/comet_pipeline/work
+```
 
 The launcher calls:
 
+```bash
 nextflow run Spatial-mIFlow/main.nf \
   -profile slurm \
   -params-file params.yml \
   -w /scratch/$USER/comet_pipeline/work
+```
 
-The launcher also sets environment variables to reduce local Python/Conda conflicts:
+It also sets environment variables to reduce local Python/Conda conflicts:
 
+```bash
 export PYTHONNOUSERSITE=1
 export PIP_NO_CACHE_DIR=1
+```
 
-4. User-facing configuration: params.yml
+---
 
-The file params.yml is the main file a user should edit. It contains sample paths, output directory, image-preparation options, SOPA parameters, and notebook parameters.
+## 4. User-facing configuration: `params.yml`
 
-4.1 Required paths
+`params.yml` is the main file a user should edit. It contains sample paths, output directory, image-preparation options, SOPA parameters, and notebook parameters.
 
+### 4.1 Required paths
+
+```yaml
 samplesheet: "master_samplesheet.csv"
 outdir: "./outputs"
+```
 
 The sample sheet should contain:
 
+```csv
 sample,data_path
 LIVER_region_B,data/Region-B_abII-subtracted.ome.tiff
 LIVER_region_D,data/Region-D_abII-subtracted.ome.tiff
+```
 
-Relative data_path values are resolved against the directory where the workflow is launched. In the current launcher, this is the project root.
+> [!NOTE]
+> Relative `data_path` values are resolved against the directory where the workflow is launched. With the current launcher, this is the project root.
 
-4.2 Image preparation parameters
+### 4.2 Image preparation parameters
 
+```yaml
 image_preparation:
   mip_end: 21
   drop_channel_names: "TRITC,Cy5"
   write_clean_channel_names_to_ome: false
   prepare_skip_if_complete: true
+```
 
-The image-preparation module also supports default values for omitted parameters. For the liver images, DAPI is the first channel and the marker channels are C2–C21, so mip_end: 21 includes all marker channels in Python slicing convention where the end index is excluded.
+The image-preparation module also supports default values for omitted parameters. For the liver images, DAPI is the first channel and the marker channels are C2–C21, so `mip_end: 21` includes all marker channels under Python slicing convention, where the end index is excluded.
 
-4.3 SOPA adapter parameters
+### 4.3 SOPA adapter parameters
 
+```yaml
 sopa_adapter:
   required_channels: "composite_MIP,DAPI"
   skip_if_complete: true
   resume: true
   profile: "singularity"
+```
 
 This controls the outer SOPA adapter, not the internal SOPA segmentation parameters themselves.
 
-4.4 SOPA segmentation parameters
+### 4.4 SOPA segmentation parameters
 
+```yaml
 sopa:
   technology: ome_tif
   patch_width_pixel: 3000
@@ -136,15 +187,14 @@ sopa:
   min_area_pixels2: 200
   expand_radius_ratio: "0.1"
   pixel_size: 0.28
+```
 
-The user should not put SOPA input: or outdir: here. These are generated automatically by the pipeline into:
+> [!IMPORTANT]
+> Do not set SOPA `input:` or `outdir:` here. They are generated automatically by the pipeline into `outputs/00_runtime/sopa_inputs/sopa_params.generated.yml`. This avoids hard-coded cluster paths and keeps the workflow portable.
 
-outputs/00_runtime/sopa_inputs/sopa_params.generated.yml
+### 4.5 Notebook parameters
 
-This avoids hard-coded cluster paths and makes the workflow portable.
-
-4.5 Notebook parameters
-
+```yaml
 notebooks:
   rapids:
     dapi_qc_percentile: 15
@@ -173,36 +223,47 @@ notebooks:
   spatial:
     cluster_normalization: "arcsinh"
     cluster_resolution: "0.5"
+```
 
-Notebook parameters are injected at runtime using Papermill. For example, the cluster-exploration process passes selected_resolutions into the notebook as:
+Notebook parameters are injected at runtime using [Papermill](https://papermill.readthedocs.io/). For example, the cluster-exploration process passes `selected_resolutions` into the notebook as:
 
+```groovy
 -p SELECTED_RESOLUTIONS "${params.notebooks.cluster_exploration.selected_resolutions}"
+```
 
-Changing a notebook parameter and running with -resume should rerun the corresponding notebook process if the injected command changes.
+Changing a notebook parameter and running with `-resume` should rerun the corresponding notebook process if the injected command changes.
 
-5. Deployment-level nextflow.config
+---
 
-The root nextflow.config is intentionally small. It contains deployment and engine settings, such as Conda and Singularity cache locations:
+## 5. Deployment-level `nextflow.config`
 
+The root `nextflow.config` is intentionally small. It contains deployment and engine settings, such as Conda and Singularity cache locations:
+
+```groovy
 conda.cacheDir = "/scratch/$USER/comet_pipeline/nextflow_conda"
 singularity.cacheDir = "/scratch/$USER/comet_pipeline/singularity"
+```
 
-This file should not contain biological parameters or notebook parameters. Those belong in params.yml.
+> [!WARNING]
+> This file should not contain biological parameters or notebook parameters. Those belong in `params.yml`.
 
-6. Pipeline code: Spatial-mIFlow/
+---
 
-The reusable workflow code lives in:
+## 6. Pipeline code: `Spatial-mIFlow/`
 
+```text
 Spatial-mIFlow/
 ├── main.nf
 ├── nextflow.config
 ├── modules/
 └── programs_hierarchy/
+```
 
-6.1 Main workflow
+### 6.1 Main workflow
 
-Spatial-mIFlow/main.nf imports DSL2 modules:
+`Spatial-mIFlow/main.nf` imports DSL2 modules:
 
+```groovy
 include { PREPARE_COMPOSITE_MIP } from './modules/prepare_composite_mip/main.nf'
 include { PUBLISH_PREPARED_IMAGE } from './modules/publish_prepared_image/main.nf'
 include { BUILD_SOPA_SAMPLESHEET } from './modules/build_sopa_samplesheet/main.nf'
@@ -213,9 +274,11 @@ include { CLUSTER_EXPLORATION_NOTEBOOK } from './modules/cluster_exploration_not
 include { CONTINGENCY_CLUSTER_POPULATIONS_NOTEBOOK } from './modules/contingency_cluster_populations_notebook/main.nf'
 include { EXPORT_SOPA_CELL_BOUNDARIES_NPZ } from './modules/export_sopa_cell_boundaries_npz/main.nf'
 include { SPATIAL_ANALYSIS_CLUSTERS_NOTEBOOK } from './modules/spatial_analysis_clusters_notebook/main.nf'
+```
 
 The workflow dataflow is:
 
+```mermaid
 flowchart TD
     A[master_samplesheet.csv] --> B[PREPARE_COMPOSITE_MIP]
     B --> C[PUBLISH_PREPARED_IMAGE]
@@ -227,20 +290,26 @@ flowchart TD
     F --> I[SCIMAP_AUTOGATING_NOTEBOOK]
     I --> J[CONTINGENCY_CLUSTER_POPULATIONS_NOTEBOOK]
     I --> K[SPATIAL_ANALYSIS_CLUSTERS_NOTEBOOK]
+```
 
-7. Module documentation
+---
 
-7.1 PREPARE_COMPOSITE_MIP
+## 7. Module documentation
 
-Location:
+### 7.1 `PREPARE_COMPOSITE_MIP`
 
+**Location**
+
+```text
 Spatial-mIFlow/modules/prepare_composite_mip/
 ├── main.nf
 ├── environment.yml
 └── bin/prepare_composite_mip.py
+```
 
-Environment:
+**Environment**
 
+```yaml
 name: image_preparation
 channels:
   - conda-forge
@@ -250,109 +319,91 @@ dependencies:
   - pandas
   - tifffile>=2023.7.10
   - imagecodecs
+```
 
-Purpose:
+**Purpose**
 
-Read large OME-TIFF images in streaming mode.
+- Read large OME-TIFF images in streaming mode.
+- Avoid loading the full image into RAM.
+- Optionally drop technical channels using name tokens.
+- Compute a `composite_MIP` channel using a one-pass streaming generator.
+- Write a SOPA-compatible OME-TIFF.
+- Validate the written OME-TIFF.
+- Save a channel map CSV and summary JSON.
 
-Avoid loading the full image into RAM.
+**Outputs**
 
-Optionally drop technical channels using name tokens.
-
-Compute a composite_MIP channel using a one-pass streaming generator.
-
-Write a SOPA-compatible OME-TIFF.
-
-Validate the written OME-TIFF.
-
-Save a channel map CSV and summary JSON.
-
-Important output files:
-
+```text
 outputs/01_prepared_images/<sample>/
 ├── <sample>_plus_composite_MIP.ome.tif
 ├── <sample>_channel_name_map.csv
 └── <sample>_image_preparation_summary.json
+```
 
-The script writes tiled, compressed OME-TIFF output with zstd compression and horizontal predictor. The module validates axes, OME metadata, channel count, and duplicate channel names before considering the file valid.
+The script writes tiled, compressed OME-TIFF output with zstd compression and a horizontal predictor. The module validates axes, OME metadata, channel count, and duplicate channel names before considering the file valid. An existing prepared image can be reused when `prepare_skip_if_complete` is `true` and the existing files pass validation.
 
-The image-preparation module can reuse an existing prepared image if prepare_skip_if_complete is true and the existing files pass validation.
+### 7.2 `PUBLISH_PREPARED_IMAGE`
 
-7.2 PUBLISH_PREPARED_IMAGE
+**Purpose**
 
-Purpose:
-
-Publish prepared OME-TIFFs and metadata to outputs/01_prepared_images/.
-
-Provide a manifest for SOPA runtime input generation.
+- Publish prepared OME-TIFFs and metadata to `outputs/01_prepared_images/`.
+- Provide a manifest for SOPA runtime input generation.
 
 This module separates the preparation work directory from the permanent output directory.
 
-7.3 BUILD_SOPA_SAMPLESHEET
+### 7.3 `BUILD_SOPA_SAMPLESHEET`
 
-Purpose:
+**Purpose**
 
-Build a SOPA-compatible sample sheet from prepared image manifests.
+- Build a SOPA-compatible sample sheet from prepared image manifests.
+- Generate a SOPA params file using the `sopa:` section of `params.yml`.
+- Dynamically add SOPA `input` and `outdir` paths.
 
-Generate a SOPA params file using the sopa: section of params.yml.
+**Generated runtime files**
 
-Dynamically add SOPA input and outdir paths.
-
-Generated runtime files:
-
+```text
 outputs/00_runtime/sopa_inputs/
 ├── sopa_samplesheet.csv
 ├── resolved_sopa_channels.json
 └── sopa_params.generated.yml
+```
 
 This prevents generated runtime files from being written inside pipeline code folders.
 
-7.4 RUN_SOPA_AND_COLLECT_ADATA
+### 7.4 `RUN_SOPA_AND_COLLECT_ADATA`
 
-Purpose:
+**Purpose**
 
-Launch the embedded nf-core/SOPA pipeline.
+- Launch the embedded nf-core/SOPA pipeline.
+- Use the generated SOPA sample sheet and generated SOPA params file.
+- Run SOPA with Singularity and SLURM.
+- Collect the resulting `adata.h5ad` paths into a manifest.
 
-Use the generated SOPA sample sheet and generated SOPA params file.
+**Output manifest:** `sopa_adata_manifest.csv`
 
-Run SOPA with Singularity and SLURM.
-
-Collect the resulting adata.h5ad paths into a manifest.
-
-Output manifest:
-
-sopa_adata_manifest.csv
-
-The manifest contains:
-
-sample_index
-sample_id
-sample_dir_name
-adata_path
-sopa_explorer_dir
+| Column | Description |
+| --- | --- |
+| `sample_index` | Index of the sample |
+| `sample_id` | Sample identifier |
+| `sample_dir_name` | Sample directory name |
+| `adata_path` | Path to the SOPA AnnData object |
+| `sopa_explorer_dir` | SOPA explorer directory |
 
 The downstream pipeline uses this manifest to pass one sample at a time into downstream modules.
 
-7.5 Inner SOPA configuration
+### 7.5 Inner SOPA configuration
 
-Location:
+**Location:** `Spatial-mIFlow/programs_hierarchy/sopa_setup/configs/sopa.config`
 
-Spatial-mIFlow/programs_hierarchy/sopa_setup/configs/sopa.config
+**Purpose**
 
-Purpose:
+- Configure inner SOPA resource allocation.
+- Separate CPU and GPU queues.
+- Enable Singularity GPU support with `--nv`.
+- Pass cache variables into containers.
+- Control Cellpose parallelism and retries.
 
-Configure inner SOPA resource allocation.
-
-Separate CPU and GPU queues.
-
-Enable Singularity GPU support with --nv.
-
-Pass cache variables into containers.
-
-Control Cellpose parallelism and retries.
-
-Important features:
-
+```groovy
 withName: '.*CELLPOSE.*' {
     queue = GPU_QUEUE
     cpus = 4
@@ -362,207 +413,159 @@ withName: '.*CELLPOSE.*' {
     errorStrategy = 'retry'
     maxRetries = 3
 }
+```
 
 This makes SOPA/Cellpose execution more predictable on HPC.
 
-7.6 RAPIDS_CLUSTERING_NOTEBOOK
+### 7.6 `RAPIDS_CLUSTERING_NOTEBOOK`
 
-Purpose:
+**Purpose**
 
-Load SOPA AnnData.
+- Load SOPA AnnData.
+- Apply DAPI-based quality control and keep the DAPI-QC-filtered cell population.
+- Apply marker transformations such as `arcsinh` / `log1p`.
+- Compute PCA / neighbors / UMAP / Leiden clusters.
+- Save clustered AnnData.
 
-Apply DAPI-based quality control.
+**Output**
 
-Keep the DAPI-QC-filtered cell population.
-
-Apply marker transformations such as arcsinh/log1p.
-
-Compute PCA/neighbors/UMAP/Leiden clusters.
-
-Save clustered AnnData.
-
-Main output:
-
+```text
 outputs/03_RAPIDS_clustering/<sample_dir>/
 ├── clustering/rapids_clustered.h5ad
 ├── dapi_qc/
 └── report/
+```
 
-Conceptually, rapids_clustered.h5ad is the clean downstream analysis object after DAPI QC. Later notebooks should use this object when they need the quality-controlled cell population.
+Conceptually, `rapids_clustered.h5ad` is the clean downstream analysis object after DAPI QC. Later notebooks should use this object when they need the quality-controlled cell population.
 
-7.7 EXPORT_SOPA_CELL_BOUNDARIES_NPZ
+### 7.7 `EXPORT_SOPA_CELL_BOUNDARIES_NPZ`
 
-Purpose:
+**Purpose**
 
-Read SOPA SpatialData .zarr output.
+- Read SOPA SpatialData `.zarr` output.
+- Extract cell-boundary polygons.
+- Save a compact `.npz` file for later visualization.
 
-Extract cell-boundary polygons.
+**Output**
 
-Save a compact .npz file for later visualization.
-
-Main output:
-
+```text
 outputs/03_SEGMENTATION_export/<sample_dir>/segmentation/cell_boundaries_for_napari.npz
+```
 
-The expected .npz keys are:
-
-polygons
-cell_ids
-shape_key
-bounds
+Expected `.npz` keys: `polygons`, `cell_ids`, `shape_key`, `bounds`.
 
 This file supports downstream visualization of real SOPA cell polygons without reopening the full SpatialData object.
 
-7.8 SCIMAP_AUTOGATING_NOTEBOOK
+### 7.8 `SCIMAP_AUTOGATING_NOTEBOOK`
 
-Purpose:
+**Purpose**
 
-Use the RAPIDS clustered AnnData as input.
+- Use the RAPIDS clustered AnnData as input.
+- Estimate marker gates with SCIMAP-style automatic gating.
+- Add positive/negative marker information and population combinations.
+- Save SCIMAP-gated AnnData.
+- Generate marker summaries and population plots.
 
-Estimate marker gates with SCIMAP-style automatic gating.
+**Output**
 
-Add positive/negative marker information and population combinations.
-
-Save SCIMAP-gated AnnData.
-
-Generate marker summaries and population plots.
-
-Main output:
-
+```text
 outputs/04_SCIMAP_autogating/<sample_dir>/
 ├── clustering/scimap_gated.h5ad
 ├── plots/
 ├── tables/
 └── report/
+```
 
-This object becomes the input for contingency and spatial analysis modules.
+This object becomes the input for the contingency and spatial analysis modules.
 
-7.9 CLUSTER_EXPLORATION_NOTEBOOK
+### 7.9 `CLUSTER_EXPLORATION_NOTEBOOK`
 
-Purpose:
+**Purpose**
 
-Explore RAPIDS/Scanpy clusters.
+- Explore RAPIDS/Scanpy clusters.
+- Plot available clustering choices.
+- Visualize selected normalizations, resolutions, and UMAP min-distance values.
+- Summarize marker expression by cluster.
 
-Plot available clustering choices.
+**Main inputs**
 
-Visualize selected normalizations, resolutions, and UMAP min-distance values.
-
-Summarize marker expression by cluster.
-
-Main inputs:
-
+```text
 rapids_clustered.h5ad
 params.notebooks.cluster_exploration.*
+```
 
-Output:
+**Output:** `outputs/05_CLUSTER_exploration/<sample_dir>/`
 
-outputs/05_CLUSTER_exploration/<sample_dir>/
+The module uses Papermill to inject sample-specific paths and user-selected plotting parameters. It serializes Jupyter kernel installation with `flock` to avoid race conditions when multiple samples run in parallel.
 
-The module uses Papermill to inject sample-specific paths and user-selected plotting parameters. It serializes Jupyter kernel installation with flock to avoid race conditions when multiple samples run in parallel.
+### 7.10 `CONTINGENCY_CLUSTER_POPULATIONS_NOTEBOOK`
 
-7.10 CONTINGENCY_CLUSTER_POPULATIONS_NOTEBOOK
+**Purpose**
 
-Purpose:
+- Compare RAPIDS Leiden clusters with SCIMAP-gated populations.
+- Generate raw count heatmaps for top gated populations across selected clusterings.
 
-Compare RAPIDS Leiden clusters with SCIMAP-gated populations.
-
-Generate raw count heatmaps for top gated populations across selected clusterings.
-
-Output:
-
-outputs/06_CONTINGENCY_clusters_populations/<sample_dir>/plots/contingency/
+**Output:** `outputs/06_CONTINGENCY_clusters_populations/<sample_dir>/plots/contingency/`
 
 This module helps interpret how unsupervised clusters relate to automatic marker-gated cell populations.
 
-7.11 SPATIAL_ANALYSIS_CLUSTERS_NOTEBOOK
+### 7.11 `SPATIAL_ANALYSIS_CLUSTERS_NOTEBOOK`
 
-Purpose:
+**Purpose**
 
-Use the SCIMAP-gated AnnData or clustered AnnData with spatial coordinates.
+- Use the SCIMAP-gated AnnData or clustered AnnData with spatial coordinates.
+- Run spatial analysis of selected cluster/gate labels.
+- Generate PDF plots for spatial organization.
 
-Run spatial analysis of selected cluster/gate labels.
+Typical analyses include spatial maps, neighborhood relationships, interaction matrices, co-occurrence patterns, centrality or graph-based summaries, and spatial autocorrelation where configured.
 
-Generate PDF plots for spatial organization.
+**Output:** `outputs/07_SPATIAL_cluster_analysis/<sample_dir>/`
 
-Typical analyses include:
+---
 
-spatial maps,
+## 8. AnnData contracts between modules
 
-neighborhood relationships,
+### 8.1 SOPA AnnData
 
-interaction matrices,
-
-co-occurrence patterns,
-
-centrality or graph-based summaries,
-
-spatial autocorrelation where configured.
-
-Output:
-
-outputs/07_SPATIAL_cluster_analysis/<sample_dir>/
-
-8. AnnData contracts between modules
-
-The pipeline relies on a clear AnnData contract.
-
-8.1 SOPA AnnData
-
-Produced by SOPA:
-
-outputs/02_sopa/<sample>.explorer/adata.h5ad
+Produced by SOPA: `outputs/02_sopa/<sample>.explorer/adata.h5ad`
 
 Expected content:
 
-one row per segmented cell/object,
+- one row per segmented cell/object,
+- marker intensity features in `.X` or layers,
+- spatial coordinates in `.obsm['spatial']` or equivalent,
+- cell identifiers in `.obs` or `.obs_names`.
 
-marker intensity features in .X or layers,
+### 8.2 RAPIDS clustered AnnData
 
-spatial coordinates in .obsm['spatial'] or equivalent,
-
-cell identifiers in .obs or .obs_names.
-
-8.2 RAPIDS clustered AnnData
-
-Produced by RAPIDS_CLUSTERING_NOTEBOOK:
-
-outputs/03_RAPIDS_clustering/<sample_dir>/clustering/rapids_clustered.h5ad
+Produced by `RAPIDS_CLUSTERING_NOTEBOOK`: `outputs/03_RAPIDS_clustering/<sample_dir>/clustering/rapids_clustered.h5ad`
 
 Expected content:
 
-DAPI-QC-filtered cells only,
+- DAPI-QC-filtered cells only,
+- marker transformations,
+- UMAP embeddings,
+- Leiden cluster columns such as `leiden_arcsinh_res_0_5` and `leiden_log1p_res_0_5`.
 
-marker transformations,
+> [!NOTE]
+> The cells removed by DAPI QC are not considered part of the clean clustered analysis population.
 
-UMAP embeddings,
+### 8.3 SCIMAP-gated AnnData
 
-Leiden cluster columns such as:
-
-leiden_arcsinh_res_0_5
-leiden_log1p_res_0_5
-
-The cells removed by DAPI QC are not considered part of the clean clustered analysis population.
-
-8.3 SCIMAP-gated AnnData
-
-Produced by SCIMAP_AUTOGATING_NOTEBOOK:
-
-outputs/04_SCIMAP_autogating/<sample_dir>/clustering/scimap_gated.h5ad
+Produced by `SCIMAP_AUTOGATING_NOTEBOOK`: `outputs/04_SCIMAP_autogating/<sample_dir>/clustering/scimap_gated.h5ad`
 
 Expected content:
 
-DAPI-QC-filtered cells,
+- DAPI-QC-filtered cells,
+- RAPIDS cluster columns preserved,
+- SCIMAP-style marker positivity and population labels,
+- spatial coordinates preserved.
 
-RAPIDS cluster columns preserved,
+---
 
-SCIMAP-style marker positivity and population labels,
+## 9. Output directory structure
 
-spatial coordinates preserved.
-
-9. Output directory structure
-
-Typical output tree:
-
+```text
 outputs/
 ├── 00_runtime/
 │   └── sopa_inputs/
@@ -577,11 +580,15 @@ outputs/
 ├── 05_CLUSTER_exploration/
 ├── 06_CONTINGENCY_clusters_populations/
 └── 07_SPATIAL_cluster_analysis/
+```
 
-10. Runtime and cache files
+---
 
-Do not commit or treat these as pipeline code:
+## 10. Runtime and cache files
 
+Do not commit or treat these as pipeline code. Recommended `.gitignore` entries:
+
+```gitignore
 .nextflow/
 .nextflow.log*
 logs/
@@ -591,74 +598,75 @@ archive/
 *.pyc
 Spatial-mIFlow/programs_hierarchy/sopa_setup/null/
 Spatial-mIFlow/programs_hierarchy/sopa_setup/singularity/
+```
 
 Large Singularity images and old SOPA reports should be stored in scratch/cache directories, not inside reusable pipeline code.
 
-Recommended .gitignore entries:
+---
 
-.nextflow/
-.nextflow.log*
-logs/
-outputs/
-archive/
-**/__pycache__/
-*.pyc
-Spatial-mIFlow/programs_hierarchy/sopa_setup/null/
-Spatial-mIFlow/programs_hierarchy/sopa_setup/singularity/
-
-11. How -resume behaves
+## 11. How `-resume` behaves
 
 Nextflow resumes based on task hashes. If a user changes a parameter that appears in a process command, the affected process should rerun.
 
-Examples:
-
-Changing notebooks.cluster_exploration.selected_resolutions reruns CLUSTER_EXPLORATION_NOTEBOOK.
-
-Changing SCIMAP parameters reruns SCIMAP and downstream contingency/spatial modules.
-
-Changing image-preparation parameters reruns image preparation and everything downstream.
-
-Changing SOPA segmentation parameters reruns SOPA and everything downstream, unless skip_if_complete causes existing SOPA outputs to be reused.
+| Change | Effect |
+| --- | --- |
+| `notebooks.cluster_exploration.selected_resolutions` | Reruns `CLUSTER_EXPLORATION_NOTEBOOK` |
+| SCIMAP parameters | Reruns SCIMAP and downstream contingency/spatial modules |
+| Image-preparation parameters | Reruns image preparation and everything downstream |
+| SOPA segmentation parameters | Reruns SOPA and everything downstream, unless `skip_if_complete` causes existing SOPA outputs to be reused |
 
 For example:
 
+```yaml
 notebooks:
   cluster_exploration:
     selected_resolutions: "0.5,1.0"
     selected_umap_min_dists: "0.3"
+```
 
 This asks the cluster-exploration notebook to use resolutions 0.5 and 1.0 with UMAP min-dist 0.3 only. These cluster columns and embeddings must already exist in the RAPIDS AnnData.
 
-12. Manual thresholding annotation side analysis
+---
+
+## 12. Manual thresholding annotation side analysis
 
 A separate manual-thresholding notebook package can be used beside this pipeline. It is not part of the automated pipeline because manual gating is user-driven, but it is designed to consume pipeline outputs.
 
-Expected inputs:
+**Expected inputs**
 
+```text
 outputs/03_RAPIDS_clustering/<sample_dir>/clustering/rapids_clustered.h5ad
 outputs/03_SEGMENTATION_export/<sample_dir>/segmentation/cell_boundaries_for_napari.npz
+```
 
-Recommended standalone notebooks:
+**Recommended standalone notebooks**
 
+```text
 manual_thresholding_annotation/
 ├── 01_manual_gate_definition.ipynb
 ├── 02_manual_gate_statistics_spatial_visualization.ipynb
 └── 03_manual_gate_spatial_analysis.ipynb
+```
 
 Manual thresholding should use only the DAPI-QC-filtered RAPIDS AnnData. In segmentation visualizations, SOPA polygons that do not match RAPIDS/DAPI-QC cells can be shown as white or light grey context.
 
-13. Article-ready software architecture summary
+---
 
-The workflow was refactored into a modular Nextflow architecture named Spatial-mIFlow, where each computational step is encapsulated as an independent module with its own script, notebook, and software environment. User-editable parameters are centralized in a YAML configuration file, while deployment-specific Nextflow engine settings remain in a small root nextflow.config. The pipeline code is isolated from user data and generated outputs, improving portability across HPC systems.
+## 13. Article-ready software architecture summary
 
-A key technical improvement is the streaming OME-TIFF preparation module. This module avoids loading full multiplex images into memory, computes a composite MIP channel, writes a tiled and compressed SOPA-compatible OME-TIFF, validates the written image, and records channel-level provenance. SOPA runtime inputs, including the sample sheet and generated SOPA parameters, are created dynamically under outputs/00_runtime/, avoiding hard-coded paths. Downstream single-cell analyses are implemented as Papermill-executed notebooks, allowing sample-specific paths and analysis parameters to be injected while preserving executed notebooks for provenance.
+The workflow was refactored into a modular Nextflow architecture named Spatial-mIFlow, where each computational step is encapsulated as an independent module with its own script, notebook, and software environment. User-editable parameters are centralized in a YAML configuration file, while deployment-specific Nextflow engine settings remain in a small root `nextflow.config`. The pipeline code is isolated from user data and generated outputs, improving portability across HPC systems.
+
+A key technical improvement is the streaming OME-TIFF preparation module. This module avoids loading full multiplex images into memory, computes a composite MIP channel, writes a tiled and compressed SOPA-compatible OME-TIFF, validates the written image, and records channel-level provenance. SOPA runtime inputs, including the sample sheet and generated SOPA parameters, are created dynamically under `outputs/00_runtime/`, avoiding hard-coded paths. Downstream single-cell analyses are implemented as Papermill-executed notebooks, allowing sample-specific paths and analysis parameters to be injected while preserving executed notebooks for provenance.
 
 This design improves reproducibility, maintainability, and scalability by separating user configuration from workflow code, isolating each computational step as a module, validating intermediate image products, and organizing outputs by analysis stage.
 
-14. Minimal checklist before running
+---
+
+## 14. Minimal checklist before running
 
 Before launching a fresh run:
 
+```bash
 # 1. Check sample sheet
 cat master_samplesheet.csv
 
@@ -673,9 +681,11 @@ nextflow -version
 
 # 5. Submit
 sbatch run_pipeline_slurm.sh
+```
 
 After the run starts:
 
+```bash
 # Check runtime SOPA inputs
 ls -lh outputs/00_runtime/sopa_inputs/
 cat outputs/00_runtime/sopa_inputs/sopa_params.generated.yml
@@ -685,3 +695,6 @@ ls -lh outputs/01_prepared_images/
 
 # Check stage outputs
 ls -lh outputs/
+```
+README.md
+Affichage de README.md en cours...

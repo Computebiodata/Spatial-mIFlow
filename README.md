@@ -15,6 +15,10 @@ Designed for COMET / Lunaphore-like multiplex IF images, the architecture is int
 
 ---
 
+## Workflow overview
+
+![Spatial-mIFlow workflow overview](workflow.png)
+
 ## Table of contents
 
 - [1. Project purpose](#1-project-purpose)

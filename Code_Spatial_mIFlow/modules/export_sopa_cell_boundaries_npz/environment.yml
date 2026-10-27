@@ -1,0 +1,12 @@
+name: segmentation_export
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - pandas
+  - spatialdata
+  - geopandas
+  - shapely
+  - dask
+  - zarr

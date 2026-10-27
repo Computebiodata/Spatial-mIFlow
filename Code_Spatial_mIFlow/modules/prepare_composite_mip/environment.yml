@@ -1,0 +1,10 @@
+name: image_preparation
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - tifffile>=2023.7.10  # older releases (e.g. 2023.2.28) silently corrupt pixels when combining tile+predictor+compression via a streaming iterator
+  - imagecodecs
+

@@ -1,0 +1,10 @@
+
+# Local containers and generated runtime files
+programs_hierarchy/sopa_setup/singularity/
+programs_hierarchy/sopa_setup/null/
+.nextflow/
+.nextflow.log*
+.nextflow.history
+__pycache__/
+*.pyc
+cellpose_cache/
